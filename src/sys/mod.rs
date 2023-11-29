@@ -15,6 +15,7 @@
 //! * `Waker`: see [`crate::Waker`].
 
 cfg_os_poll! {
+    #[cfg(not(target_os = "wasi"))]
     macro_rules! debug_detail {
         (
             $type: ident ($event_type: ty), $test: path,
