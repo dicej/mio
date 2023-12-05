@@ -16,20 +16,18 @@
 use netc as libc;
 use preview2::wasi::{
     clocks::monotonic_clock,
-    io::{
-        poll,
-        streams::{InputStream, OutputStream},
-    },
+    io::poll::{self, Pollable},
     sockets::{network::ErrorCode, tcp::TcpSocket},
 };
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::c_int;
 use std::io;
-use std::mem::{ManuallyDrop, MaybeUninit};
+use std::mem::ManuallyDrop;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::os::fd::RawFd;
+use std::ptr;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -130,10 +128,10 @@ impl Selector {
 
         let mut states = Vec::new();
         for (fd, subscription) in subscriptions.deref() {
-            let mut variant = MaybeUninit::uninit();
-            let variant = unsafe {
-                if libc::descriptor_table_get(*fd, variant.as_mut_ptr()) {
-                    variant.assume_init()
+            let mut entry_ref = ptr::null_mut();
+            let entry = unsafe {
+                if libc::descriptor_table_get_ref(*fd, &mut entry_ref) {
+                    *entry_ref
                 } else {
                     return Err(io::Error::from_raw_os_error(libc::EBADF));
                 }
@@ -149,52 +147,56 @@ impl Selector {
                 .map(|v| v.is_writable())
                 .unwrap_or(false);
 
-            static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-            if NEXT_ID.fetch_add(1, Ordering::Relaxed) > 20 {
-                panic!();
-            }
+            match entry.tag {
+                libc::descriptor_table_entry_tag_t::DESCRIPTOR_TABLE_ENTRY_TCP_SOCKET => {
+                    let socket = unsafe { entry.value.tcp_socket };
+                    match socket.state_tag {
+                        libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTING => {
+                            if readable || writable {
+                                states.push((
+                                    ManuallyDrop::new(unsafe {
+                                        Pollable::from_handle(socket.socket_pollable)
+                                    }),
+                                    *fd,
+                                    socket,
+                                    *subscription,
+                                    subscription.interests.unwrap(),
+                                ));
+                            }
+                        }
 
-            match variant.tag {
-                libc::descriptor_table_tag_t::DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTING => {
-                    if readable || writable {
-                        states.push((
-                            ManuallyDrop::new(unsafe {
-                                TcpSocket::from_handle(variant.value.tcp_new.socket)
-                            })
-                            .subscribe(),
-                            *fd,
-                            variant,
-                            *subscription,
-                            subscription.interests.unwrap(),
-                        ));
-                    }
-                }
+                        libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTED => {
+                            if writable {
+                                states.push((
+                                    ManuallyDrop::new(unsafe {
+                                        Pollable::from_handle(
+                                            socket.state.connected.output_pollable,
+                                        )
+                                    }),
+                                    *fd,
+                                    socket,
+                                    *subscription,
+                                    Interest::WRITABLE,
+                                ));
+                            }
 
-                libc::descriptor_table_tag_t::DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTED => {
-                    if writable {
-                        states.push((
-                            ManuallyDrop::new(unsafe {
-                                OutputStream::from_handle(variant.value.tcp_connected.tx)
-                            })
-                            .subscribe(),
-                            *fd,
-                            variant,
-                            *subscription,
-                            Interest::WRITABLE,
-                        ));
-                    }
+                            if readable {
+                                states.push((
+                                    ManuallyDrop::new(unsafe {
+                                        Pollable::from_handle(socket.state.connected.input_pollable)
+                                    }),
+                                    *fd,
+                                    socket,
+                                    *subscription,
+                                    Interest::READABLE,
+                                ));
+                            }
+                        }
 
-                    if readable {
-                        states.push((
-                            ManuallyDrop::new(unsafe {
-                                InputStream::from_handle(variant.value.tcp_connected.rx)
-                            })
-                            .subscribe(),
-                            *fd,
-                            variant,
-                            *subscription,
-                            Interest::READABLE,
-                        ));
+                        _ => panic!(
+                            "state tag for {fd} {} is {:?} {}",
+                            entry_ref as usize, socket.state_tag, socket.state_tag as u8
+                        ), //return Err(io::Error::from_raw_os_error(libc::EBADF)),
                     }
                 }
 
@@ -204,7 +206,7 @@ impl Selector {
 
         let mut pollables = states
             .iter()
-            .map(|(pollable, ..)| pollable)
+            .map(|(pollable, ..)| pollable.deref())
             .collect::<Vec<_>>();
 
         let timeout = timeout.map(|timeout| {
@@ -220,7 +222,7 @@ impl Selector {
         for index in poll::poll_list(&pollables) {
             let index = usize::try_from(index).unwrap();
             if timeout.is_none() || index != pollables.len() - 1 {
-                let (_, fd, variant, subscription, interests) = &states[index];
+                let (_, fd, socket, subscription, interests) = &states[index];
 
                 let mut push_event = || {
                     events.push(Event {
@@ -229,44 +231,50 @@ impl Selector {
                     })
                 };
 
-                if variant.tag
-                    == libc::descriptor_table_tag_t::DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTING
-                {
-                    let socket = ManuallyDrop::new(unsafe {
-                        TcpSocket::from_handle(variant.value.tcp_new.socket)
-                    });
+                if socket.state_tag == libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTING {
+                    let socket_resource =
+                        ManuallyDrop::new(unsafe { TcpSocket::from_handle(socket.socket) });
 
-                    match socket.finish_connect() {
-                        Ok((rx, tx)) => unsafe {
-                            libc::descriptor_table_update(*fd, libc::descriptor_table_variant_t {
-                                tag: libc::descriptor_table_tag_t::DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTED,
-                                value: libc::descriptor_table_value_t {
-                                    tcp_connected: libc::descriptor_table_tcp_connected_t {
-                                        socket: variant.value.tcp_new,
-                                        rx: rx.into_handle(),
-                                        tx: tx.into_handle()
-                                    }
-                                }
-                            });
+                    let socket_ptr = || unsafe {
+                        let mut entry_ref = ptr::null_mut();
+                        if libc::descriptor_table_get_ref(*fd, &mut entry_ref) {
+                            &mut (*entry_ref).value.tcp_socket
+                        } else {
+                            unreachable!();
+                        }
+                    };
+
+                    match socket_resource.finish_connect() {
+                        Ok((rx, tx)) => {
+                            let socket_ptr = socket_ptr();
+                            socket_ptr.state_tag =
+                                libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTED;
+                            socket_ptr.state = libc::tcp_socket_state_t {
+                                connected: libc::tcp_socket_state_connected_t {
+                                    input_pollable: rx.subscribe().into_handle(),
+                                    input: rx.into_handle(),
+                                    output_pollable: tx.subscribe().into_handle(),
+                                    output: tx.into_handle(),
+                                },
+                            };
                             push_event();
-                        },
+                        }
                         Err(ErrorCode::WouldBlock) => {}
-                        Err(error) => unsafe {
-                            libc::descriptor_table_update(*fd, libc::descriptor_table_variant_t {
-                                tag: libc::descriptor_table_tag_t::DESCRIPTOR_TABLE_VARIANT_TCP_ERROR,
-                                value: libc::descriptor_table_value_t {
-                                    tcp_error: libc::descriptor_table_tcp_error_t {
-                                        socket: variant.value.tcp_new,
-                                        error: error as u8,
-                                    }
-                                }
-                            });
+                        Err(error) => {
+                            let socket_ptr = socket_ptr();
+                            socket_ptr.state_tag =
+                                libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECT_FAILED;
+                            socket_ptr.state = libc::tcp_socket_state_t {
+                                connect_failed: libc::tcp_socket_state_connect_failed_t {
+                                    error_code: error as u8,
+                                },
+                            };
                             push_event();
-                        },
+                        }
                     }
                 } else {
-                    // Emulate edge-triggering by deregistering interest in `interests`; `IoSourceState.do_io` will
-                    // re-register if/when appropriate.
+                    // Emulate edge-triggering by deregistering interest in `interests`; `IoSourceState::do_io`
+                    // will re-register if/when appropriate.
                     let fd_interests = &mut subscriptions.get_mut(fd).unwrap().interests;
                     *fd_interests = (*fd_interests).and_then(|v| v.remove(*interests));
                     push_event();
@@ -505,7 +513,7 @@ mod netc {
         pub s_addr: u32,
     }
 
-    #[repr(C)]
+    #[repr(C, align(16))]
     #[derive(Copy, Clone)]
     pub struct sockaddr_in {
         pub sin_family: sa_family_t,
@@ -519,7 +527,7 @@ mod netc {
         pub s6_addr: [u8; 16],
     }
 
-    #[repr(C)]
+    #[repr(C, align(16))]
     #[derive(Copy, Clone)]
     pub struct sockaddr_in6 {
         pub sin6_family: sa_family_t,
@@ -538,48 +546,73 @@ mod netc {
 
     #[repr(C)]
     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-    pub enum descriptor_table_tag_t {
-        DESCRIPTOR_TABLE_VARIANT_TCP_NEW,
-        DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTING,
-        DESCRIPTOR_TABLE_VARIANT_TCP_CONNECTED,
-        DESCRIPTOR_TABLE_VARIANT_TCP_ERROR,
+    pub enum descriptor_table_entry_tag_t {
+        DESCRIPTOR_TABLE_ENTRY_TCP_SOCKET,
+        DESCRIPTOR_TABLE_ENTRY_UDP_SOCKET,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+    pub enum tcp_socket_state_tag_t {
+        TCP_SOCKET_STATE_UNBOUND,
+        TCP_SOCKET_STATE_BOUND,
+        TCP_SOCKET_STATE_CONNECTING,
+        TCP_SOCKET_STATE_CONNECTED,
+        TCP_SOCKET_STATE_CONNECT_FAILED,
+        TCP_SOCKET_STATE_LISTENING,
     }
 
     #[repr(C)]
     #[derive(Copy, Clone)]
-    pub struct descriptor_table_tcp_new_t {
+    pub struct tcp_socket_state_connected_t {
+        pub input: u32,
+        pub input_pollable: u32,
+        pub output: u32,
+        pub output_pollable: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct tcp_socket_state_connect_failed_t {
+        pub error_code: u8,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub union tcp_socket_state_t {
+        pub connected: tcp_socket_state_connected_t,
+        pub connect_failed: tcp_socket_state_connect_failed_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct tcp_socket_t {
+        pub socket: u32,
+        pub socket_pollable: u32,
+        pub blocking: bool,
+        pub state_tag: tcp_socket_state_tag_t,
+        pub state: tcp_socket_state_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct udp_socket_t {
         pub socket: u32,
         pub blocking: bool,
     }
 
     #[repr(C)]
     #[derive(Copy, Clone)]
-    pub struct descriptor_table_tcp_connected_t {
-        pub socket: descriptor_table_tcp_new_t,
-        pub rx: u32,
-        pub tx: u32,
+    pub union descriptor_table_entry_value_t {
+        pub tcp_socket: tcp_socket_t,
+        pub udp_socket: udp_socket_t,
     }
 
     #[repr(C)]
     #[derive(Copy, Clone)]
-    pub struct descriptor_table_tcp_error_t {
-        pub socket: descriptor_table_tcp_new_t,
-        pub error: u8,
-    }
-
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    pub union descriptor_table_value_t {
-        pub tcp_new: descriptor_table_tcp_new_t,
-        pub tcp_connected: descriptor_table_tcp_connected_t,
-        pub tcp_error: descriptor_table_tcp_error_t,
-    }
-
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    pub struct descriptor_table_variant_t {
-        pub tag: descriptor_table_tag_t,
-        pub value: descriptor_table_value_t,
+    pub struct descriptor_table_entry_t {
+        pub tag: descriptor_table_entry_tag_t,
+        pub value: descriptor_table_entry_value_t,
     }
 
     extern "C" {
@@ -587,8 +620,9 @@ mod netc {
 
         pub fn connect(socket: c_int, address: *const sockaddr, len: socklen_t) -> c_int;
 
-        pub fn descriptor_table_get(fd: c_int, variant: *mut descriptor_table_variant_t) -> bool;
-
-        pub fn descriptor_table_update(fd: c_int, variant: descriptor_table_variant_t) -> bool;
+        pub fn descriptor_table_get_ref(
+            fd: c_int,
+            entry: *mut *mut descriptor_table_entry_t,
+        ) -> bool;
     }
 }
