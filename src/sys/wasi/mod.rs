@@ -210,7 +210,7 @@ impl Selector {
             .collect::<Vec<_>>();
 
         let timeout = timeout.map(|timeout| {
-            monotonic_clock::subscribe(timeout.as_nanos().try_into().unwrap(), false)
+            monotonic_clock::subscribe_duration(timeout.as_nanos().try_into().unwrap())
         });
         pollables.extend(&timeout);
 
@@ -219,7 +219,7 @@ impl Selector {
             warn!("calling mio::Poll::poll with empty pollables; this likely not what you want");
         }
 
-        for index in poll::poll_list(&pollables) {
+        for index in poll::poll(&pollables) {
             let index = usize::try_from(index).unwrap();
             if timeout.is_none() || index != pollables.len() - 1 {
                 let (_, fd, socket, subscription, interests) = &states[index];
