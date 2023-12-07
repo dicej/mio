@@ -8,9 +8,6 @@
 //! polling as both registering and polling requires a lock on the
 //! `subscriptions`.
 //!
-//! Finally `Selector::try_clone`, required by `Registry::try_clone`, doesn't
-//! work. However this could be implemented by use of an `Arc`.
-//!
 //! In summary, this only (barely) works using a single thread.
 
 use netc as libc;
@@ -193,10 +190,7 @@ impl Selector {
                             }
                         }
 
-                        _ => panic!(
-                            "state tag for {fd} {} is {:?} {}",
-                            entry_ref as usize, socket.state_tag, socket.state_tag as u8
-                        ), //return Err(io::Error::from_raw_os_error(libc::EBADF)),
+                        _ => return Err(io::Error::from_raw_os_error(libc::EBADF)),
                     }
                 }
 
