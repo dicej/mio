@@ -147,7 +147,7 @@ impl Selector {
             match entry.tag {
                 libc::descriptor_table_entry_tag_t::DESCRIPTOR_TABLE_ENTRY_TCP_SOCKET => {
                     let socket = unsafe { entry.value.tcp_socket };
-                    match socket.state_tag {
+                    match socket.state.tag {
                         libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTING => {
                             if readable || writable {
                                 states.push((
@@ -167,7 +167,7 @@ impl Selector {
                                 states.push((
                                     ManuallyDrop::new(unsafe {
                                         Pollable::from_handle(
-                                            socket.state.connected.output_pollable,
+                                            socket.state.value.connected.output_pollable,
                                         )
                                     }),
                                     *fd,
@@ -180,7 +180,9 @@ impl Selector {
                             if readable {
                                 states.push((
                                     ManuallyDrop::new(unsafe {
-                                        Pollable::from_handle(socket.state.connected.input_pollable)
+                                        Pollable::from_handle(
+                                            socket.state.value.connected.input_pollable,
+                                        )
                                     }),
                                     *fd,
                                     socket,
@@ -225,7 +227,7 @@ impl Selector {
                     })
                 };
 
-                if socket.state_tag == libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTING {
+                if socket.state.tag == libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTING {
                     let socket_resource =
                         ManuallyDrop::new(unsafe { TcpSocket::from_handle(socket.socket) });
 
@@ -241,14 +243,15 @@ impl Selector {
                     match socket_resource.finish_connect() {
                         Ok((rx, tx)) => {
                             let socket_ptr = socket_ptr();
-                            socket_ptr.state_tag =
-                                libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTED;
                             socket_ptr.state = libc::tcp_socket_state_t {
-                                connected: libc::tcp_socket_state_connected_t {
-                                    input_pollable: rx.subscribe().into_handle(),
-                                    input: rx.into_handle(),
-                                    output_pollable: tx.subscribe().into_handle(),
-                                    output: tx.into_handle(),
+                                tag: libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECTED,
+                                value: libc::tcp_socket_state_value_t {
+                                    connected: libc::tcp_socket_state_connected_t {
+                                        input_pollable: rx.subscribe().into_handle(),
+                                        input: rx.into_handle(),
+                                        output_pollable: tx.subscribe().into_handle(),
+                                        output: tx.into_handle(),
+                                    },
                                 },
                             };
                             push_event();
@@ -256,11 +259,12 @@ impl Selector {
                         Err(ErrorCode::WouldBlock) => {}
                         Err(error) => {
                             let socket_ptr = socket_ptr();
-                            socket_ptr.state_tag =
-                                libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECT_FAILED;
                             socket_ptr.state = libc::tcp_socket_state_t {
-                                connect_failed: libc::tcp_socket_state_connect_failed_t {
-                                    error_code: error as u8,
+                                tag: libc::tcp_socket_state_tag_t::TCP_SOCKET_STATE_CONNECT_FAILED,
+                                value: libc::tcp_socket_state_value_t {
+                                    connect_failed: libc::tcp_socket_state_connect_failed_t {
+                                        error_code: error as u8,
+                                    },
                                 },
                             };
                             push_event();
@@ -573,9 +577,16 @@ mod netc {
 
     #[repr(C)]
     #[derive(Copy, Clone)]
-    pub union tcp_socket_state_t {
+    pub union tcp_socket_state_value_t {
         pub connected: tcp_socket_state_connected_t,
         pub connect_failed: tcp_socket_state_connect_failed_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct tcp_socket_state_t {
+        pub tag: tcp_socket_state_tag_t,
+        pub value: tcp_socket_state_value_t,
     }
 
     #[repr(C)]
@@ -584,15 +595,63 @@ mod netc {
         pub socket: u32,
         pub socket_pollable: u32,
         pub blocking: bool,
-        pub state_tag: tcp_socket_state_tag_t,
+        pub fake_nodelay: bool,
+        pub family: u8,
         pub state: tcp_socket_state_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+    pub enum udp_socket_state_tag_t {
+        UDP_SOCKET_STATE_UNBOUND,
+        UDP_SOCKET_STATE_BOUND_NOSTREAMS,
+        UDP_SOCKET_STATE_BOUND_STREAMING,
+        UDP_SOCKET_STATE_CONNECTED,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct udp_socket_streams_t {
+        pub incoming: u32,
+        pub incoming_pollable: u32,
+        pub outgoing: u32,
+        pub outgoing_pollable: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct udp_socket_state_bound_streaming_t {
+        pub streams: udp_socket_streams_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct udp_socket_state_connected_t {
+        pub streams: udp_socket_streams_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub union udp_socket_state_value_t {
+        pub bound_streaming: udp_socket_state_bound_streaming_t,
+        pub connected: udp_socket_state_connected_t,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct udp_socket_state_t {
+        pub tag: udp_socket_state_tag_t,
+        pub value: udp_socket_state_value_t,
     }
 
     #[repr(C)]
     #[derive(Copy, Clone)]
     pub struct udp_socket_t {
         pub socket: u32,
+        pub socket_pollable: u32,
         pub blocking: bool,
+        pub family: u8,
+        pub state: udp_socket_state_t,
     }
 
     #[repr(C)]
