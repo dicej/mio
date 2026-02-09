@@ -383,8 +383,14 @@ impl Poll {
     ///
     /// A basic example -- establishing a `TcpStream` connection.
     ///
-    #[cfg_attr(all(feature = "os-poll", feature = "net"), doc = "```")]
-    #[cfg_attr(not(all(feature = "os-poll", feature = "net")), doc = "```ignore")]
+    #[cfg_attr(
+        all(feature = "os-poll", feature = "net", not(target_os = "wasi")),
+        doc = "```"
+    )]
+    #[cfg_attr(
+        not(all(feature = "os-poll", feature = "net", not(target_os = "wasi"))),
+        doc = "```ignore"
+    )]
     /// # use std::error::Error;
     /// # fn main() -> Result<(), Box<dyn Error>> {
     /// use mio::{Events, Poll, Interest, Token};

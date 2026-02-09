@@ -62,6 +62,11 @@ impl Waker {
         self.empty();
     }
 
+    #[allow(dead_code)] // Only used by the `poll(2)` implementation.
+    pub(crate) fn fd_or_woken(&self) -> Result<RawFd, bool> {
+        Ok(self.as_raw_fd())
+    }
+
     /// Empty the pipe's buffer, only need to call this if `wake` fails.
     /// This ignores any errors.
     fn empty(&self) {

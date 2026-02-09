@@ -83,6 +83,22 @@ jobs:
     - name: Check
       # We only run check allowing us to use newer features in tests.
       run: cargo check --all-features
+  TestWASI:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Setup `wasmtime`
+      uses: bytecodealliance/actions/wasmtime/setup@v1
+      with:
+        version: "41.0.3"
+    - name: Install target
+      run: rustup target add wasm32-wasip2
+    - name: Tests
+      run: cargo test --target wasm32-wasip2 --all-features
+      env:
+        CARGO_TARGET_WASM32_WASIP2_RUNNER: wasmtime run -Sinherit-network
   Nightly:
     runs-on: ubuntu-latest
     timeout-minutes: 10

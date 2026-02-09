@@ -67,6 +67,11 @@ impl Waker {
         let _ = self.reset();
     }
 
+    #[allow(dead_code)] // Only used by the `poll(2)` implementation.
+    pub(crate) fn fd_or_woken(&self) -> Result<RawFd, bool> {
+        Ok(self.as_raw_fd())
+    }
+
     /// Reset the eventfd object, only need to call this if `wake` fails.
     #[allow(clippy::unused_io_amount)] // Don't care about partial reads.
     fn reset(&self) -> io::Result<()> {

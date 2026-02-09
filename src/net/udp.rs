@@ -31,8 +31,12 @@ use crate::{event, sys, Interest, Registry, Token};
 ///
 /// # Examples
 ///
-#[cfg_attr(feature = "os-poll", doc = "```")]
-#[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
+// Temporarily disabled on WASI pending https://github.com/WebAssembly/wasi-libc/pull/740:
+#[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
+#[cfg_attr(
+    not(all(feature = "os-poll", not(target_os = "wasi"))),
+    doc = "```ignore"
+)]
 /// # use std::error::Error;
 /// #
 /// # fn main() -> Result<(), Box<dyn Error>> {
@@ -339,8 +343,12 @@ impl UdpSocket {
     ///
     /// # Examples
     ///
-    #[cfg_attr(feature = "os-poll", doc = "```")]
-    #[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
+    // WASI does not yet support broacast
+    #[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
+    #[cfg_attr(
+        not(all(feature = "os-poll", not(target_os = "wasi"))),
+        doc = "```ignore"
+    )]
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {
@@ -369,8 +377,12 @@ impl UdpSocket {
     ///
     /// # Examples
     ///
-    #[cfg_attr(feature = "os-poll", doc = "```")]
-    #[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
+    // WASI does not yet support broacast
+    #[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
+    #[cfg_attr(
+        not(all(feature = "os-poll", not(target_os = "wasi"))),
+        doc = "```ignore"
+    )]
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {

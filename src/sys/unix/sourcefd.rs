@@ -31,11 +31,21 @@ use crate::{event, Interest, Registry, Token};
 /// Basic usage.
 ///
 #[cfg_attr(
-    all(feature = "os-poll", feature = "net", feature = "os-ext"),
+    all(
+        feature = "os-poll",
+        feature = "net",
+        feature = "os-ext",
+        not(target_os = "wasi")
+    ),
     doc = "```"
 )]
 #[cfg_attr(
-    not(all(feature = "os-poll", feature = "net", feature = "os-ext")),
+    not(all(
+        feature = "os-poll",
+        feature = "net",
+        feature = "os-ext",
+        not(target_os = "wasi")
+    )),
     doc = "```ignore"
 )]
 /// # use std::error::Error;
@@ -62,8 +72,14 @@ use crate::{event, Interest, Registry, Token};
 ///
 /// Implementing [`event::Source`] for a custom type backed by a [`RawFd`].
 ///
-#[cfg_attr(all(feature = "os-poll", feature = "os-ext"), doc = "```")]
-#[cfg_attr(not(all(feature = "os-poll", feature = "os-ext")), doc = "```ignore")]
+#[cfg_attr(
+    all(feature = "os-poll", feature = "os-ext", not(target_os = "wasi")),
+    doc = "```"
+)]
+#[cfg_attr(
+    not(all(feature = "os-poll", feature = "os-ext", not(target_os = "wasi"))),
+    doc = "```ignore"
+)]
 /// use mio::{event, Interest, Registry, Token};
 /// use mio::unix::SourceFd;
 ///
