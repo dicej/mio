@@ -31,15 +31,13 @@ use crate::{event, sys, Interest, Registry, Token};
 ///
 /// # Examples
 ///
-// Temporarily disabled on WASI pending https://github.com/WebAssembly/wasi-libc/pull/740:
-#[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
-#[cfg_attr(
-    not(all(feature = "os-poll", not(target_os = "wasi"))),
-    doc = "```ignore"
-)]
+#[cfg_attr(feature = "os-poll", doc = "```")]
+#[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
 /// # use std::error::Error;
 /// #
 /// # fn main() -> Result<(), Box<dyn Error>> {
+/// # // Temporarily disabled on WASI pending https://github.com/WebAssembly/wasi-libc/pull/740:
+/// # if cfg!(target_os = "wasi") { return Ok(()) }
 /// // An Echo program:
 /// // SENDER -> sends a message.
 /// // ECHOER -> listens and prints the message received.
@@ -343,15 +341,13 @@ impl UdpSocket {
     ///
     /// # Examples
     ///
-    // WASI does not yet support broacast
-    #[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
-    #[cfg_attr(
-        not(all(feature = "os-poll", not(target_os = "wasi"))),
-        doc = "```ignore"
-    )]
+    #[cfg_attr(feature = "os-poll", doc = "```")]
+    #[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # // WASI does not yet support broacast
+    /// # if cfg!(target_os = "wasi") { return Ok(()) }
     /// use mio::net::UdpSocket;
     ///
     /// let broadcast_socket = UdpSocket::bind("127.0.0.1:0".parse()?)?;
@@ -377,15 +373,13 @@ impl UdpSocket {
     ///
     /// # Examples
     ///
-    // WASI does not yet support broacast
-    #[cfg_attr(all(feature = "os-poll", not(target_os = "wasi")), doc = "```")]
-    #[cfg_attr(
-        not(all(feature = "os-poll", not(target_os = "wasi"))),
-        doc = "```ignore"
-    )]
+    #[cfg_attr(feature = "os-poll", doc = "```")]
+    #[cfg_attr(not(feature = "os-poll"), doc = "```ignore")]
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # // WASI does not yet support broacast
+    /// # if cfg!(target_os = "wasi") { return Ok(()) }
     /// use mio::net::UdpSocket;
     ///
     /// let broadcast_socket = UdpSocket::bind("127.0.0.1:0".parse()?)?;
