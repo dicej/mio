@@ -27,6 +27,8 @@ pub(crate) fn new_socket(domain: libc::c_int, socket_type: libc::c_int) -> io::R
         target_os = "cygwin",
     ))]
     let socket_type = socket_type | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC;
+    // WASI doesn't have the concept of `fork`ing or `exec`ing processes, so
+    // `SOCK_CLOEXEC` neither exists nor is relevant:
     #[cfg(target_os = "wasi")]
     let socket_type = socket_type | libc::SOCK_NONBLOCK;
     #[cfg(target_os = "nto")]

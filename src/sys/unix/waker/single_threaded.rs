@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 ///
 /// This implementation is meant for systems with only a single thread of
 /// control, in which case it is not possible to wake a thread which is already
-/// blocked on a select call.  Thus, this may only be used to ensure the next
+/// blocked on a select call. Thus, this may only be used to ensure the next
 /// select call by the current thread polls without blocking.
 ///
 /// Note that this is currently meant only for use with the `poll(2)`
@@ -29,15 +29,13 @@ impl Waker {
         Ok(())
     }
 
-    /// The contract for this function is that, if the `Waker` is multithreaded,
-    /// return the file descriptor to which wake events will be sent, but if it
-    /// is single-threaded, return a `bool` indicating whether it has been
-    /// woken.
-    ///
-    /// The implementation here always returns the `bool`, whereas the
-    /// implementations in `pipe.rs` and `eventfd.rs` always return the `RawFD`.
-    pub(crate) fn fd_or_woken(&self) -> Result<RawFd, bool> {
-        Err(self.woken.load(Relaxed))
+    /// Only non-`None` for the `pipe(2)`- and `eventfd(2)`-based `Waker`s:
+    pub(crate) fn fd(&self) -> Option<RawFd> {
+        None
+    }
+
+    pub(crate) fn woken(&self) -> bool {
+        self.woken.load(Relaxed)
     }
 
     pub(crate) fn ack_and_reset(&self) {

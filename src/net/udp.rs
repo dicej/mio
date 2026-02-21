@@ -346,7 +346,7 @@ impl UdpSocket {
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {
-    /// # // WASI does not yet support broacast
+    /// # // WASI does not yet support broadcast.
     /// # if cfg!(target_os = "wasi") { return Ok(()) }
     /// use mio::net::UdpSocket;
     ///
@@ -378,7 +378,7 @@ impl UdpSocket {
     /// # use std::error::Error;
     /// #
     /// # fn main() -> Result<(), Box<dyn Error>> {
-    /// # // WASI does not yet support broacast
+    /// # // WASI does not yet support broadcast.
     /// # if cfg!(target_os = "wasi") { return Ok(()) }
     /// use mio::net::UdpSocket;
     ///

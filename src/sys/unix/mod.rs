@@ -156,7 +156,6 @@ cfg_os_poll! {
             target_os = "vita",
             target_os = "cygwin",
         ),
-        // Hermit doesn't support pipes.
         not(target_os = "hermit"),
         not(target_os = "wasi"),
     ))]

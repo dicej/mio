@@ -191,6 +191,9 @@ fn smoke_test_unconnected_udp_socket(mut socket1: UdpSocket, mut socket2: UdpSoc
 
     expect_read!(socket1.recv_from(&mut buf), DATA2, address2);
     expect_read!(socket2.recv_from(&mut buf), DATA1, address1);
+
+    assert!(socket1.take_error().unwrap().is_none());
+    assert!(socket2.take_error().unwrap().is_none());
 }
 
 #[cfg_attr(

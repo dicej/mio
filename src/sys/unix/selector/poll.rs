@@ -168,13 +168,14 @@ impl SelectorState {
 
         Ok(Self {
             fds: Mutex::new(Fds {
-                poll_fds: match notify_waker.fd_or_woken() {
-                    Ok(fd) => vec![PollFd(libc::pollfd {
+                poll_fds: if let Some(fd) = notify_waker.fd() {
+                    vec![PollFd(libc::pollfd {
                         fd,
                         events: libc::POLLIN,
                         revents: 0,
-                    })],
-                    Err(_) => Vec::new(),
+                    })]
+                } else {
+                    Vec::new()
                 },
                 fd_data: HashMap::new(),
             }),
@@ -209,7 +210,7 @@ impl SelectorState {
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
-            if let Err(true) = self.notify_waker.fd_or_woken() {
+            if self.notify_waker.woken() {
                 timeout = Some(Duration::from_secs(0))
             }
 
@@ -225,17 +226,14 @@ impl SelectorState {
             let waker_events;
             let notified;
             let mut num_fd_events;
-            match self.notify_waker.fd_or_woken() {
-                Ok(_) => {
-                    waker_events = fds.poll_fds[0].0.revents;
-                    notified = waker_events != 0;
-                    num_fd_events = if notified { num_events - 1 } else { num_events }
-                }
-                Err(woken) => {
-                    waker_events = 0;
-                    notified = woken;
-                    num_fd_events = num_events;
-                }
+            if self.notify_waker.fd().is_some() {
+                waker_events = fds.poll_fds[0].0.revents;
+                notified = waker_events != 0;
+                num_fd_events = if notified { num_events - 1 } else { num_events }
+            } else {
+                waker_events = 0;
+                notified = self.notify_waker.woken();
+                num_fd_events = num_events;
             };
 
             let pending_wake_token = self.pending_wake_token.lock().unwrap().take();
@@ -324,7 +322,7 @@ impl SelectorState {
         interests: Interest,
     ) -> io::Result<Arc<RegistrationRecord>> {
         #[cfg(all(debug_assertions, not(target_os = "wasi")))]
-        if Ok(fd) == self.notify_waker.fd_or_woken() {
+        if Some(fd) == self.notify_waker.fd() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
